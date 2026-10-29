@@ -1,0 +1,13 @@
+.vs/
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# SQLite files are excluded by default
+*.db
+*.db-shm
+*.db-wal
+
+# Keep the demo database
+!sample-data/minishop.db

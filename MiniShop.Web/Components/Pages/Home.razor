@@ -1,0 +1,258 @@
+﻿@page "/"
+@using System.Net.Http.Json
+@using MiniShop.Application.DTOs
+@using MiniShop.Web.Services
+@inject CartService Cart
+@inject NavigationManager NavigationManager
+
+<PageTitle>MiniShop — магазин</PageTitle>
+
+<div class="shop-header">
+    <div>
+        <h1>MiniShop</h1>
+        <p>Каталог товаров</p>
+    </div>
+
+    <button class="refresh-button" @onclick="LoadProductsAsync">
+        Обновить каталог
+    </button>
+</div>
+
+
+<div class="catalog-filters">
+    <div class="form-field">
+        <label for="searchName">Поиск по названию</label>
+        <input id="searchName"
+               type="text"
+               @bind="searchText"
+               @bind:event="oninput"
+               placeholder="Например, мышь" />
+    </div>
+
+    <div class="form-field">
+        <label for="filterType">Тип товара</label>
+        <select id="filterType" @bind="selectedType">
+            <option value="All">Все товары</option>
+            <option value="Physical">Физические</option>
+            <option value="Digital">Цифровые</option>
+        </select>
+    </div>
+
+    <div class="form-field">
+        <label for="minPrice">Цена от</label>
+        <input id="minPrice"
+               type="number"
+               min="0"
+               step="0.01"
+               @bind="minPrice"
+               @bind:event="oninput" />
+    </div>
+
+    <div class="form-field">
+        <label for="maxPrice">Цена до</label>
+        <input id="maxPrice"
+               type="number"
+               min="0"
+               step="0.01"
+               @bind="maxPrice"
+               @bind:event="oninput" />
+    </div>
+
+    <div class="form-field">
+        <label for="sortOrder">Сортировка</label>
+        <select id="sortOrder" @bind="sortOrder">
+            <option value="name-asc">По названию (А–Я)</option>
+            <option value="name-desc">По названию (Я–А)</option>
+            <option value="price-asc">По цене (сначала дешевле)</option>
+            <option value="price-desc">По цене (сначала дороже)</option>
+        </select>
+    </div>
+
+    <button type="button"
+            class="refresh-button"
+            @onclick="ResetFilters">
+        Сбросить фильтры
+    </button>
+</div>
+
+<p>Найдено товаров: @FilteredProducts.Count</p>
+
+
+@if (isLoading)
+{
+    <p>Загружаем товары...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="error-message">@errorMessage</div>
+}
+else if (products.Count == 0)
+{
+    <div class="empty-state">
+        <h2>Пока нет товаров</h2>
+        <p>В каталоге пока нет товаров. Загляните позже.</p>
+    </div>
+}
+else
+{
+    <div class="product-grid">
+        @foreach (var product in FilteredProducts)
+        {
+            <article class="product-card" @key="product.Id">
+                <div class="product-icon">
+                    @(product.ProductType == "Physical" ? "📦" : "💻")
+                </div>
+
+                <span class="product-type">
+                    @(product.ProductType == "Physical" ? "Физический товар" : "Цифровой товар")
+                </span>
+
+                <h2>@product.Name</h2>
+
+                <p class="fs-5 fw-bold">
+                    @product.FinalPrice.ToString("N2") ₽
+                </p>
+
+                <p>
+                    <strong>Тип:</strong>
+                    @(product.ProductType == "Physical" ? "Физический товар" : "Цифровой товар")
+                </p>
+
+                @if (product.ProductType == "Physical")
+                {
+                    <p>
+                        <strong>На складе:</strong>
+                        @product.StockQuantity шт.
+                    </p>
+                }
+
+                @if (product.ProductType == "Physical")
+                {
+                    <p>Стоимость доставки: @product.ShippingCost.ToString("N2")</p>
+                }
+                else
+                {
+                    <p>Лицензия: @product.LicenseDurationDays дней</p>
+                }
+
+            <button class="btn btn-primary"
+                    @onclick="() => AddToCart(product)"
+                    disabled="@(product.ProductType == "Physical" && product.StockQuantity <= 0)">
+                @(product.ProductType == "Physical" && product.StockQuantity <= 0? "Нет в наличии": "В корзину")
+             </button>
+
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private List<ProductDto> products = new();
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    private string searchText = string.Empty;
+    private string selectedType = "All";
+    private decimal? minPrice;
+    private decimal? maxPrice;
+    private string sortOrder = "name-asc";
+
+
+    private List<ProductDto> FilteredProducts
+    {
+        get
+        {
+            IEnumerable<ProductDto> result = products;
+
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                result = result.Where(product => product.Name.Contains(searchText.Trim(),StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (selectedType != "All")
+            {
+                result = result.Where(product => product.ProductType == selectedType);
+            }
+
+            if (minPrice.HasValue)
+            {
+                result = result.Where(product => product.FinalPrice >= minPrice.Value);
+            }
+
+            if (maxPrice.HasValue)
+            {
+                result = result.Where(product => product.FinalPrice <= maxPrice.Value);
+            }
+
+            result = sortOrder switch
+            {
+                "name-asc" => result.OrderBy(product => product.Name),
+                "name-desc" => result.OrderByDescending(product => product.Name),
+                "price-asc" => result.OrderBy(product => product.FinalPrice),
+                "price-desc" => result.OrderByDescending(product => product.FinalPrice),
+                _ => result
+            };
+
+            return result.ToList();
+        }
+    }
+
+    private void AddToCart(ProductDto product)
+    {
+        try
+        {
+            Cart.Add(product);
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private void ResetFilters()
+    {
+        searchText = string.Empty;
+        selectedType = "All";
+        minPrice = null;
+        maxPrice = null;
+        sortOrder = "name-asc";
+    }
+
+
+    private HttpClient CreateApiClient()
+    {
+        return new HttpClient
+        {
+            BaseAddress = new Uri(NavigationManager.BaseUri)
+        };
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProductsAsync();
+    }
+
+    private async Task LoadProductsAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            using var client = CreateApiClient();
+
+            var result = await client.GetFromJsonAsync<List<ProductDto>>(
+                "api/products");
+
+            products = result ?? new List<ProductDto>();
+        }
+        catch (Exception)
+        {
+            errorMessage = "Не удалось загрузить каталог. Проверь, запущен ли API.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}
